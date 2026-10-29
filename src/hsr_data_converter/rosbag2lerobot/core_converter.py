@@ -87,78 +87,81 @@ def _convert_individual_rosbag_to_lerobot_format(
         )
         dataset_root = dataset.root
 
-        # time statistics
-        rosbag1_process_start_time = time.time()
+        try:
+            # time statistics
+            rosbag1_process_start_time = time.time()
 
-        # Parse meta.json for episode task
-        meta_path = rosbag_dir / "meta.json"
-        if not meta_path.exists():
-            print(f"[WARN] meta.json missing in {rosbag_dir}, skipping.")
-            shutil.rmtree(dataset_root)
-            continue
-
-        loader = MetadataLoader()
-        metadata = loader.load_from_file(str(meta_path))
-        if not isinstance(metadata, Metadata):
-            # Convert to latest metadata format.
-            metadata = Metadata.convert(metadata)
-
-        # Load frames from rosbag
-        episodes, all_tasks, all_timestamps, _ = load_hsr_episodes(
-            cfg, metadata, rosbag_dir, typestore, dataset
-        )
-
-        for frames, tasks, timestamps in zip(episodes, all_tasks, all_timestamps):
-            if not frames:
-                print(f"[WARN] No valid frames in {rosbag_dir}, skipping.")
+            # Parse meta.json for episode task
+            meta_path = rosbag_dir / "meta.json"
+            if not meta_path.exists():
+                print(f"[WARN] meta.json missing in {rosbag_dir}, skipping.")
                 shutil.rmtree(dataset_root)
                 continue
 
-            # Add frames to dataset
-            for frame, task, timestamp in zip(frames, tasks, timestamps):
-                dataset.add_frame(frame=frame, task=task, timestamp=timestamp)
+            loader = MetadataLoader()
+            metadata = loader.load_from_file(str(meta_path))
+            if not isinstance(metadata, Metadata):
+                # Convert to latest metadata format.
+                metadata = Metadata.convert(metadata)
 
-            # get the episode index
-            episode_index = dataset.episode_buffer["episode_index"]
-
-            # NOTE: Fix timestamp shape to match the shape of 'episode_index'.
-            dataset.episode_buffer["timestamp"] = np.squeeze(
-                dataset.episode_buffer["timestamp"]
+            # Load frames from rosbag
+            episodes, all_tasks, all_timestamps, _ = load_hsr_episodes(
+                cfg, metadata, rosbag_dir, typestore, dataset
             )
 
-            # Save the episode using new API
-            dataset.save_episode()
+            for frames, tasks, timestamps in zip(episodes, all_tasks, all_timestamps):
+                if not frames:
+                    print(f"[WARN] No valid frames in {rosbag_dir}, skipping.")
+                    shutil.rmtree(dataset_root)
+                    continue
 
-            # Add new tasks to the tasks dictionary
-            # short_horizon_task = metadata.run.instructions[-1][0]
-            # short_horizon_task_index = dataset.meta.get_task_index(short_horizon_task)
-            # if short_horizon_task_index is None:
-            #     dataset.meta.add_task(short_horizon_task)
+                # Add frames to dataset
+                for frame, task, timestamp in zip(frames, tasks, timestamps):
+                    dataset.add_frame(frame=frame, task=task, timestamp=timestamp)
 
-            # update the last line of episodes.jsonl
-            task_type = "PA" if cfg.separate_per_primitive else "SHT"
-            task_success = bool(
-                frames[0]["success_primitive_action"][0]
-                if cfg.separate_per_primitive
-                else metadata.run.segments[-1].success
-            )
-            new_data_for_episodes_jsonl[episode_index] = _create_episodes_info(
-                metadata,
-                task_type,
-                task_success,
-                pipeline_git_hash,
-                pipeline_git_branch,
-            )
+                # get the episode index
+                episode_index = dataset.episode_buffer["episode_index"]
 
-            print(
-                f"[INFO] Elapsed time: {time.time() - rosbag1_process_start_time} [s]"
-            )
-            print("[INFO] UPDATE the episodes.jsonl")
-            update_episodes_jsonl(
-                new_data_for_episodes_jsonl, dataset.root / "meta/episodes.jsonl"
-            )
+                # NOTE: Fix timestamp shape to match the shape of 'episode_index'.
+                dataset.episode_buffer["timestamp"] = np.squeeze(
+                    dataset.episode_buffer["timestamp"]
+                )
 
-            print(f"[INFO] Conversion complete. Dataset saved to {out_dir}")
+                # Save the episode using new API
+                dataset.save_episode()
+
+                # Add new tasks to the tasks dictionary
+                # short_horizon_task = metadata.run.instructions[-1][0]
+                # short_horizon_task_index = dataset.meta.get_task_index(short_horizon_task)
+                # if short_horizon_task_index is None:
+                #     dataset.meta.add_task(short_horizon_task)
+
+                # update the last line of episodes.jsonl
+                task_type = "PA" if cfg.separate_per_primitive else "SHT"
+                task_success = bool(
+                    frames[0]["success_primitive_action"][0]
+                    if cfg.separate_per_primitive
+                    else metadata.run.segments[-1].success
+                )
+                new_data_for_episodes_jsonl[episode_index] = _create_episodes_info(
+                    metadata,
+                    task_type,
+                    task_success,
+                    pipeline_git_hash,
+                    pipeline_git_branch,
+                )
+
+                print(
+                    f"[INFO] Elapsed time: {time.time() - rosbag1_process_start_time} [s]"
+                )
+                print("[INFO] UPDATE the episodes.jsonl")
+                update_episodes_jsonl(
+                    new_data_for_episodes_jsonl, dataset.root / "meta/episodes.jsonl"
+                )
+
+                print(f"[INFO] Conversion complete. Dataset saved to {out_dir}")
+        finally:
+            dataset.stop_image_writer()
 
     return dataset
 
@@ -293,6 +296,8 @@ def _convert_aggregate_rosbag_to_lerobot_format(
         new_data_for_episodes_jsonl, dataset.root / "meta/episodes.jsonl"
     )
     print(f"[INFO] Dataset saved to {out_dir}")
+
+    dataset.stop_image_writer()
 
     return dataset
 
